@@ -8,6 +8,7 @@ import xarray
 import matplotlib.pyplot as plt
 import logging
 import argparse
+import os
 
 
 def get_dt(args, size, cl):
@@ -145,13 +146,45 @@ def main(args):
       res *= 2
 
     if args.demo:
+      # Demo mode: create visualizations with demo_steps
       for resolution in resolution_list:
         trajectory = get_trajectory(args, size=resolution, outer_steps=args.demo_steps, v0=warmup_result)
         file_name = f'../figs/%s_demo_{resolution}x{resolution}.png' % args.save_file
         logger.info(file_name)
         plot_trajectory(args, resolution, trajectory, file_name)
     else:
-      pass
+      # Training data mode: generate full datasets with generate_steps
+      for resolution in resolution_list:
+        trajectory = get_trajectory(args, size=resolution, outer_steps=args.generate_steps, v0=warmup_result)
+        
+        save_dir = f'../data/training_data'
+        os.makedirs(save_dir, exist_ok=True)
+        
+        data_file = f'{save_dir}/{args.save_file}_{resolution}x{resolution}_index_{args.save_index}.npz'
+        logger.info(f"Saving training data to: {data_file}")
+        
+        # Save velocity components and ALL metadata needed for plot_trajectory
+        np.savez_compressed(data_file,
+                           u=trajectory[0].data,  # x-velocity component
+                           v=trajectory[1].data,  # y-velocity component
+                           resolution=resolution,
+                           outer_steps=args.generate_steps,
+                           warmup_time=args.warmup_time,
+                           max_velocity=args.max_velocity,
+                           viscosity=args.viscosity,
+                           decay=args.decay,
+                           seed=args.seed,
+                           # Additional args needed for plot_trajectory
+                           characteristic_length=args.characteristic_length,
+                           domain_scale=args.domain_scale,
+                           low_res=args.low_res,
+                           cfl_safety_factor=args.cfl_safety_factor,
+                           density=args.density,
+                           forcing_scale=args.forcing_scale,
+                           peak_wavenumber=args.peak_wavenumber)
+        
+        logger.info(f"Saved trajectory shape: {trajectory[0].data.shape}")
+        logger.info(f"Resolution: {resolution}x{resolution}, Steps: {args.generate_steps}")
 
 
 if __name__ == "__main__":
@@ -179,4 +212,4 @@ if __name__ == "__main__":
   # For generating data
   parser.add_argument('--save_file', type=str, default="re1000")
   parser.add_argument('--save_index', type=int, default=1)
-  main(parser.parse_args())
+  main(parser.parse_args()) 
