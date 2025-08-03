@@ -64,16 +64,17 @@ def compute_energy_spectrum(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     
     # Get spatial dimensions
     nx, ny = u.shape[-2], u.shape[-1]
-    kx = jnp.fft.fftfreq(nx, 1.0)
-    ky = jnp.fft.fftfreq(ny, 1.0)
+    kx = jnp.fft.fftfreq(nx, 1.0) * nx  # Scale by nx for proper wavenumber
+    ky = jnp.fft.fftfreq(ny, 1.0) * ny  # Scale by ny for proper wavenumber
     
     # Create 2D wavenumber grid
     kx_grid, ky_grid = jnp.meshgrid(kx, ky, indexing='ij')
     k_magnitude = jnp.sqrt(kx_grid**2 + ky_grid**2)
     
-    # Radial averaging to get 1D spectrum
-    k_max = int(jnp.max(k_magnitude))
-    k_bins = jnp.arange(0, k_max + 1)
+    # FIXED: Radial averaging to get 1D spectrum
+    k_max = int(jnp.max(k_magnitude)) + 1  # +1 to ensure non-empty range
+    k_max = max(k_max, 10)  # Ensure at least 10 bins
+    k_bins = jnp.linspace(0, k_max, k_max + 1)
     energy_spectrum = jnp.zeros((energy_density.shape[0], len(k_bins) - 1))
     
     for i in range(len(k_bins) - 1):
@@ -301,11 +302,9 @@ def main():
         print(f"Processing resolution: {resolution}")
         print(f"{'='*60}")
         
-        # Define file paths
         training_file = f"data/training_data/decaying_turbulence_v2_{resolution}_index_1.npz"
         pred_file = f"data/pict_data/decaying_turbulence_{resolution}_index_1.npz"
         
-        # Check if files exist
         if not os.path.exists(training_file):
             print(f"Training file not found: {training_file}")
             continue
@@ -314,27 +313,21 @@ def main():
             continue
         
         try:
-            # Load and align data with correct sampling
             print("Loading and aligning data...")
             data = load_and_align_data(training_file, pred_file)
             
-            # Apply evaluation metrics
             print("Applying evaluation metrics...")
             results = apply_selected_metrics(data)
             
-            # Store results
             all_results[resolution] = results
             
-            # Create comprehensive visualizations
             print("Creating visualizations...")
             create_comprehensive_plots(data, results, resolution, results_dir)
             
-            # Save detailed results
             results_file = os.path.join(results_dir, f'detailed_results_{resolution}.json')
             with open(results_file, 'w') as f:
                 json.dump(results, f, indent=2)
             
-            # Print summary
             print(f"\n📊 Results Summary for {resolution}:")
             print(f"  Energy Spectrum Metric: {results.get('energy_spectrum_metric', 0):.6f}")
             print(f"  Spatial Correlation Metric: {results.get('spatial_correlation_metric', 0):.6f}")
@@ -350,7 +343,6 @@ def main():
             traceback.print_exc()
             continue
     
-    # Save combined results
     combined_results_file = os.path.join(results_dir, 'all_refined_results.json')
     with open(combined_results_file, 'w') as f:
         json.dump(all_results, f, indent=2)
