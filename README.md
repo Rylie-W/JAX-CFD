@@ -1,3 +1,13 @@
+To generate the decaying turbulence decaying data, run
+```
+cd data/
+./generate_decaying_turbulence_train.sh
+```
+
+To compare the PICT data with the reference, run
+```
+python refined_data_comparison.py   
+```
 # JAX-CFD
 Machine Learning-accelerated Computational Fluid Dynamics (CFD)
 
