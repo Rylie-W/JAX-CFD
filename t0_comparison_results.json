@@ -1,0 +1,20 @@
+{
+  "64x64": {
+    "resolution": "64x64",
+    "identical_u": false,
+    "identical_v": false,
+    "rmse_u": 1.114668607711792,
+    "rmse_v": 1.4518818855285645,
+    "correlation_u": 0.4108096302982427,
+    "correlation_v": 0.02396933979473066
+  },
+  "128x128": {
+    "resolution": "128x128",
+    "identical_u": false,
+    "identical_v": false,
+    "rmse_u": 1.1188366413116455,
+    "rmse_v": 1.4552503824234009,
+    "correlation_u": 0.4094876592660977,
+    "correlation_v": 0.02362941561225512
+  }
+}

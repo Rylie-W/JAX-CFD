@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """Refined data comparison analysis with correct time sampling understanding."""
 
+import os
+# Force JAX to use CPU to avoid CUDA/cuDNN issues
+os.environ['JAX_PLATFORM_NAME'] = 'cpu'
+
 import numpy as np
 import matplotlib.pyplot as plt
 import xarray as xr
 import jax
 import jax.numpy as jnp
 from typing import Dict, Tuple, List
-import os
 import json
 from pathlib import Path
 
-def load_and_align_data(training_file: str, pred_file: str, sampling_interval: int = 50):
+# Additional JAX configuration for CPU
+jax.config.update('jax_platform_name', 'cpu')
+
+def load_and_align_data(training_file: str, pred_file: str, sampling_interval: int = 1):
     """Load and temporally align training and prediction data."""
     print(f"Loading training data: {training_file}")
     training_data = np.load(training_file)
@@ -28,6 +34,8 @@ def load_and_align_data(training_file: str, pred_file: str, sampling_interval: i
     # Subsample training data to match prediction sampling
     training_u_subsampled = training_u[::sampling_interval]  # Every 50th step
     training_v_subsampled = training_v[::sampling_interval]
+    pred_u = pred_data['u'][:training_u_subsampled.shape[0]]    # Shape: (243, 64, 64) - removed last timestep  
+    pred_v = pred_data['v'][:training_v_subsampled.shape[0]] 
     
     print(f"Original training shape: {training_u.shape}")
     print(f"Subsampled training shape: {training_u_subsampled.shape}")
@@ -284,7 +292,7 @@ def main():
     os.makedirs(results_dir, exist_ok=True)
     
     # Define data files to compare (start with 64x64 for testing)
-    resolutions = ['64x64']  # Can expand to ['64x64', '128x128', '256x256', '512x512']
+    resolutions = ['128x128']  # Can expand to ['64x64', '128x128', '256x256', '512x512']
     
     all_results = {}
     
@@ -295,7 +303,7 @@ def main():
         
         # Define file paths
         training_file = f"data/training_data/decaying_turbulence_v2_{resolution}_index_1.npz"
-        pred_file = f"data/pict_data/pict_from_training_{resolution}_index_1.npz"
+        pred_file = f"data/pict_data/decaying_turbulence_{resolution}_index_1.npz"
         
         # Check if files exist
         if not os.path.exists(training_file):
@@ -308,7 +316,7 @@ def main():
         try:
             # Load and align data with correct sampling
             print("Loading and aligning data...")
-            data = load_and_align_data(training_file, pred_file, sampling_interval=50)
+            data = load_and_align_data(training_file, pred_file)
             
             # Apply evaluation metrics
             print("Applying evaluation metrics...")
