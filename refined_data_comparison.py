@@ -17,7 +17,7 @@ from pathlib import Path
 # Additional JAX configuration for CPU
 jax.config.update('jax_platform_name', 'cpu')
 
-def load_and_align_data(training_file: str, pred_file: str, sampling_interval: int = 1):
+def load_and_align_data(training_file: str, pred_file: str, sampling_interval: int = 1, max_timesteps: int = 1000):
     """Load and temporally align training and prediction data."""
     print(f"Loading training data: {training_file}")
     training_data = np.load(training_file)
@@ -26,16 +26,16 @@ def load_and_align_data(training_file: str, pred_file: str, sampling_interval: i
     pred_data = np.load(pred_file)
     
     # Extract velocity fields
-    training_u = training_data['u']  # Shape: (12200, 64, 64)
-    training_v = training_data['v']  # Shape: (12200, 64, 64)
-    pred_u = pred_data['u']         # Shape: (244, 64, 64)  
-    pred_v = pred_data['v']         # Shape: (244, 64, 64)
+    training_u = training_data['u'][:max_timesteps]  # Take first max_timesteps steps
+    training_v = training_data['v'][:max_timesteps]
+    pred_u = pred_data['u'][:max_timesteps]
+    pred_v = pred_data['v'][:max_timesteps]
     
     # Subsample training data to match prediction sampling
-    training_u_subsampled = training_u[::sampling_interval]  # Every 50th step
+    training_u_subsampled = training_u[::sampling_interval]
     training_v_subsampled = training_v[::sampling_interval]
-    pred_u = pred_data['u'][:training_u_subsampled.shape[0]]    # Shape: (243, 64, 64) - removed last timestep  
-    pred_v = pred_data['v'][:training_v_subsampled.shape[0]] 
+    pred_u = pred_u[:training_u_subsampled.shape[0]]
+    pred_v = pred_v[:training_v_subsampled.shape[0]]
     
     print(f"Original training shape: {training_u.shape}")
     print(f"Subsampled training shape: {training_u_subsampled.shape}")
@@ -314,7 +314,7 @@ def main():
         
         try:
             print("Loading and aligning data...")
-            data = load_and_align_data(training_file, pred_file)
+            data = load_and_align_data(training_file, pred_file, max_timesteps=1000)
             
             print("Applying evaluation metrics...")
             results = apply_selected_metrics(data)
