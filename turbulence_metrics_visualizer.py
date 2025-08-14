@@ -1,13 +1,3 @@
-#!/usr/bin/env python3
-"""
-湍流物理指标可视化对比工具
-=============================
-基于现有的refined_data_comparison.py，扩展添加更多湍流物理指标的可视化对比
-
-作者: Assistant
-日期: 2024
-"""
-
 import os
 # Force JAX to use CPU to avoid CUDA/cuDNN issues
 os.environ['JAX_PLATFORM_NAME'] = 'cpu'
