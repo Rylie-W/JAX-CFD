@@ -328,7 +328,7 @@ def main():
     
     for resolution in resolutions:
         training_file = f"data/training_data/decaying_turbulence_v2_{resolution}_index_1.npz"
-        pict_file = f"data/pict_data/pict_from_warmup_{resolution}_index_1.npz"
+        pict_file = f"data/pict_data/pict_from_warmup_with_comparison_{resolution}_index_1.npz"
         
         if not os.path.exists(training_file):
             print(f"❌ Training file not found: {training_file}")
