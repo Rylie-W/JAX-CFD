@@ -9,9 +9,9 @@ set -x
 # - Burn-in time and other parameters from paper
 
 python generate_data.py \
-    --high_res 2048 \
-    --low_res 1024 \
-    --outer_steps 50 \
+    --high_res 256 \
+    --low_res 256 \
+    --outer_steps 1 \
     --generate_steps 12200 \
     --warmup_time 4.0 \
     --max_velocity 4.2 \
@@ -21,4 +21,5 @@ python generate_data.py \
     --save_index 1 \
     --iters 1 \
     --demo_file "decaying_turbulence_v2" \
-    --seed 42 
+    --seed 42 \
+    --save_warmup 

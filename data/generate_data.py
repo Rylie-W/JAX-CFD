@@ -119,6 +119,7 @@ def main(args):
 
     count = 0
     warmup_result = None
+    warmup_trajectories = []  # Store warmup trajectories if needed
 
     while count + outer_steps <= warm_up_step:
       logger.info(f"step {count} of {warm_up_step}")
@@ -127,14 +128,53 @@ def main(args):
         warmup_result[1].array.data = warmup_result[1].array.data[-1]
       warmup_result = get_trajectory(args, size=args.high_res, rng=subrng,
                                      outer_steps=outer_steps, v0=warmup_result)
+      
+      # Store warmup trajectory if save_warmup is enabled
+      if args.save_warmup:
+        warmup_trajectories.append((count, warmup_result))
+      
       count += outer_steps
 
     if warm_up_step > count:
       if warmup_result is not None:
         warmup_result[0].array.data = warmup_result[0].array.data[-1]
         warmup_result[1].array.data = warmup_result[1].array.data[-1]
-      warmup_result = get_trajectory(args, size=args.high_res, rng=subrng,
-                                     outer_steps=warm_up_step - count, v0=warmup_result)
+      final_warmup = get_trajectory(args, size=args.high_res, rng=subrng,
+                                   outer_steps=warm_up_step - count, v0=warmup_result)
+      if args.save_warmup:
+        warmup_trajectories.append((count, final_warmup))
+      warmup_result = final_warmup
+
+    # Save warmup data if requested
+    if args.save_warmup and warmup_trajectories:
+      save_dir = f'../data/warmup_data'
+      os.makedirs(save_dir, exist_ok=True)
+      
+      logger.info(f"Saving {len(warmup_trajectories)} warmup trajectory segments...")
+      for segment_idx, (step_count, trajectory) in enumerate(warmup_trajectories):
+        warmup_file = f'{save_dir}/{args.high_res}/{args.save_file}_warmup_segment_{segment_idx}_step_{step_count}_index_{args.save_index}.npz'
+        logger.info(f"Saving warmup segment to: {warmup_file}")
+        
+        np.savez_compressed(warmup_file,
+                           u=trajectory[0].data,
+                           v=trajectory[1].data,
+                           resolution=args.high_res,
+                           outer_steps=outer_steps if step_count + outer_steps <= warm_up_step else warm_up_step - step_count,
+                           warmup_segment=segment_idx,
+                           warmup_step_count=step_count,
+                           warmup_time=args.warmup_time,
+                           warmup_time_step=delta_t,  # Add warmup time step
+                           max_velocity=args.max_velocity,
+                           viscosity=args.viscosity,
+                           decay=args.decay,
+                           seed=args.seed,
+                           characteristic_length=args.characteristic_length,
+                           domain_scale=args.domain_scale,
+                           low_res=args.low_res,
+                           cfl_safety_factor=args.cfl_safety_factor,
+                           density=args.density,
+                           forcing_scale=args.forcing_scale,
+                           peak_wavenumber=args.peak_wavenumber)
 
     warmup_result[0].array.data = warmup_result[0].array.data[-1]
     warmup_result[1].array.data = warmup_result[1].array.data[-1]
@@ -181,7 +221,8 @@ def main(args):
                            cfl_safety_factor=args.cfl_safety_factor,
                            density=args.density,
                            forcing_scale=args.forcing_scale,
-                           peak_wavenumber=args.peak_wavenumber)
+                           peak_wavenumber=args.peak_wavenumber,
+                           timestep = get_dt(args, args.low_res, args.characteristic_length))
         
         logger.info(f"Saved trajectory shape: {trajectory[0].data.shape}")
         logger.info(f"Resolution: {resolution}x{resolution}, Steps: {args.generate_steps}")
@@ -209,6 +250,7 @@ if __name__ == "__main__":
   parser.add_argument('--domain_scale', type=int, default=1)
   parser.add_argument('--decay', default=False, action='store_true')
   parser.add_argument('--demo', default=False, action='store_true')
+  parser.add_argument('--save_warmup', default=False, action='store_true')
   # For generating data
   parser.add_argument('--save_file', type=str, default="re1000")
   parser.add_argument('--save_index', type=int, default=1)
