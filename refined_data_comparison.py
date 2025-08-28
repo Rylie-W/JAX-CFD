@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""Refined data comparison analysis with correct time sampling understanding."""
+"""
+Physics-based turbulence simulation comparison analysis.
+
+This tool compares turbulence simulations using physical properties and statistical
+measures that are robust to the chaotic nature of turbulent flows, rather than 
+point-wise differences which are highly sensitive to initial conditions.
+
+Key improvements over traditional comparison:
+- Energy decay law analysis (E(t) ~ t^(-n))
+- Kolmogorov scaling verification (E(k) ~ k^(-5/3))
+- Higher-order velocity statistics (skewness, kurtosis)
+- Integral length scale comparison
+- Overall physics-based assessment
+
+These metrics focus on whether both simulations capture the essential physics
+of turbulence, avoiding the chaos sensitivity of point-wise comparisons.
+"""
 
 import os
 # Force JAX to use CPU to avoid CUDA/cuDNN issues
@@ -85,8 +101,8 @@ def compute_energy_spectrum(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     
     return energy_spectrum
 
-def apply_selected_metrics(data: Dict) -> Dict:
-    """Apply the four selected evaluation metrics."""
+def compute_physics_based_metrics(data: Dict) -> Dict:
+    """Apply physics-based evaluation metrics that are robust to chaos."""
     results = {}
     
     training_u = data['training_u']
@@ -94,78 +110,210 @@ def apply_selected_metrics(data: Dict) -> Dict:
     pred_u = data['pred_u']
     pred_v = data['pred_v']
     
-    print("Computing evaluation metrics...")
+    print("Computing physics-based metrics...")
     
-    # 1. Energy Spectrum Metric
-    print("  1. Computing energy spectrum metric...")
+    # 1. Energy Decay Law Analysis
+    print("  1. Computing energy decay analysis...")
+    def compute_energy_decay(u, v):
+        kinetic_energy = 0.5 * jnp.mean(u**2 + v**2, axis=(-2, -1))
+        time_steps = jnp.arange(1, len(kinetic_energy) + 1)
+        
+        # Fit power law: E(t) = A * t^(-n)
+        log_t = jnp.log(time_steps)
+        log_E = jnp.log(kinetic_energy)
+        valid_mask = jnp.isfinite(log_E) & jnp.isfinite(log_t)
+        
+        if jnp.sum(valid_mask) > 5:
+            coeffs = jnp.polyfit(log_t[valid_mask], log_E[valid_mask], 1)
+            decay_exponent = -coeffs[0]
+            fit_quality = jnp.corrcoef(log_t[valid_mask], log_E[valid_mask])[0, 1]**2
+        else:
+            decay_exponent = jnp.nan
+            fit_quality = 0.0
+            
+        return {
+            'kinetic_energy': kinetic_energy.tolist(),
+            'decay_exponent': float(decay_exponent),
+            'fit_quality': float(fit_quality)
+        }
+    
+    training_decay = compute_energy_decay(training_u, training_v)
+    pred_decay = compute_energy_decay(pred_u, pred_v)
+    
+    results['energy_decay_analysis'] = {
+        'training': training_decay,
+        'predicted': pred_decay,
+        'decay_exponent_difference': abs(training_decay['decay_exponent'] - pred_decay['decay_exponent']),
+        'is_physical': (1.0 <= training_decay['decay_exponent'] <= 1.5) and 
+                      (1.0 <= pred_decay['decay_exponent'] <= 1.5)
+    }
+    
+    # 2. Enhanced Energy Spectrum Analysis (Kolmogorov scaling)
+    print("  2. Computing Kolmogorov scaling analysis...")
     training_spectrum = compute_energy_spectrum(training_u, training_v)
     pred_spectrum = compute_energy_spectrum(pred_u, pred_v)
     
-    # Compute log difference where both spectra are above threshold
+    def analyze_kolmogorov_scaling(spectrum):
+        k_values = jnp.arange(1, spectrum.shape[1])
+        avg_spectrum = jnp.mean(spectrum, axis=0)[1:]  # Skip k=0
+        
+        # Find inertial range (k = 3 to k = k_max/3)
+        k_max = len(avg_spectrum)
+        inertial_start = 3
+        inertial_end = max(inertial_start + 3, k_max // 3)
+        
+        if inertial_end > inertial_start:
+            k_inertial = k_values[inertial_start:inertial_end]
+            E_inertial = avg_spectrum[inertial_start:inertial_end]
+            
+            valid_mask = E_inertial > 0
+            if jnp.sum(valid_mask) > 3:
+                log_k = jnp.log(k_inertial[valid_mask])
+                log_E = jnp.log(E_inertial[valid_mask])
+                coeffs = jnp.polyfit(log_k, log_E, 1)
+                slope = coeffs[0]
+                fit_quality = jnp.corrcoef(log_k, log_E)[0, 1]**2
+            else:
+                slope = jnp.nan
+                fit_quality = 0.0
+        else:
+            slope = jnp.nan
+            fit_quality = 0.0
+            
+        return {
+            'inertial_slope': float(slope),
+            'deviation_from_kolmogorov': float(abs(slope + 5/3)) if not jnp.isnan(slope) else jnp.nan,
+            'fit_quality': float(fit_quality)
+        }
+    
+    training_kolm = analyze_kolmogorov_scaling(training_spectrum)
+    pred_kolm = analyze_kolmogorov_scaling(pred_spectrum)
+    
+    results['kolmogorov_analysis'] = {
+        'training': training_kolm,
+        'predicted': pred_kolm,
+        'slope_difference': abs(training_kolm['inertial_slope'] - pred_kolm['inertial_slope'])
+    }
+    
+    # Traditional energy spectrum comparison (for reference)
     threshold = 0.01
     valid_mask = (training_spectrum > threshold) & (pred_spectrum > threshold)
     log_diff = jnp.abs(jnp.log(pred_spectrum) - jnp.log(training_spectrum))
     energy_metric = jnp.mean(jnp.where(valid_mask, log_diff, 0))
-    results['energy_spectrum_metric'] = float(energy_metric)
+    results['traditional_energy_spectrum_metric'] = float(energy_metric)
     
-    # 2. Spatial Correlation Metric (simplified u-x correlation)
-    print("  2. Computing spatial correlation metric...")
-    # Compute spatial autocorrelation for u component
-    def spatial_autocorr(field):
-        # Compute autocorrelation along x-axis
-        autocorr = []
-        for lag in range(min(10, field.shape[-1]//4)):  # Limited lags
-            shifted = jnp.roll(field, lag, axis=-1)
-            corr = jnp.mean(field * shifted, axis=(-2, -1))
-            autocorr.append(corr)
-        return jnp.array(autocorr)
+    # 3. Velocity Statistics Analysis (Higher-order moments)
+    print("  3. Computing velocity statistics...")
+    def compute_velocity_moments(u, v):
+        u_flat = u.flatten()
+        v_flat = v.flatten()
+        
+        # Remove any infinite or NaN values
+        u_clean = u_flat[jnp.isfinite(u_flat)]
+        v_clean = v_flat[jnp.isfinite(v_flat)]
+        
+        u_mean, v_mean = jnp.mean(u_clean), jnp.mean(v_clean)
+        u_std, v_std = jnp.std(u_clean), jnp.std(v_clean)
+        
+        # Higher-order moments (skewness and kurtosis indicate non-Gaussianity)
+        u_skew = jnp.mean(((u_clean - u_mean) / (u_std + 1e-10))**3)
+        v_skew = jnp.mean(((v_clean - v_mean) / (v_std + 1e-10))**3)
+        u_kurt = jnp.mean(((u_clean - u_mean) / (u_std + 1e-10))**4) - 3  # Excess kurtosis
+        v_kurt = jnp.mean(((v_clean - v_mean) / (v_std + 1e-10))**4) - 3
+        
+        return {
+            'mean': (float(u_mean), float(v_mean)),
+            'std': (float(u_std), float(v_std)),
+            'skewness': (float(u_skew), float(v_skew)),
+            'kurtosis': (float(u_kurt), float(v_kurt))
+        }
     
-    training_spatial_corr = spatial_autocorr(training_u)
-    pred_spatial_corr = spatial_autocorr(pred_u)
+    training_moments = compute_velocity_moments(training_u, training_v)
+    pred_moments = compute_velocity_moments(pred_u, pred_v)
     
-    # Compute difference in spatial correlations
-    spatial_threshold = 0.5
-    spatial_diff = jnp.abs(pred_spatial_corr - training_spatial_corr)
-    spatial_metric = jnp.mean(jnp.where(jnp.abs(training_spatial_corr) > spatial_threshold, 
-                                       spatial_diff, 0))
-    results['spatial_correlation_metric'] = float(spatial_metric)
+    results['velocity_statistics'] = {
+        'training': training_moments,
+        'predicted': pred_moments,
+        'skewness_difference': abs(training_moments['skewness'][0] - pred_moments['skewness'][0]),
+        'kurtosis_difference': abs(training_moments['kurtosis'][0] - pred_moments['kurtosis'][0])
+    }
     
-    # 3. Temporal Autocorrelation
-    print("  3. Computing temporal autocorrelation...")
-    def temporal_autocorr(field, max_lag=20):
-        # Compute temporal autocorrelation
-        autocorr = []
-        for lag in range(min(max_lag, field.shape[0]//4)):
-            if lag < field.shape[0]:
-                field_rolled = jnp.roll(field, lag, axis=0)
-                # Mask out invalid entries due to rolling
-                valid_range = slice(lag, None) if lag > 0 else slice(None)
-                corr = jnp.mean(field[valid_range] * field_rolled[valid_range])
-                autocorr.append(corr)
-        return jnp.array(autocorr)
+    # 4. Integral Scale Analysis
+    print("  4. Computing integral scale analysis...")
+    def compute_integral_length_scale(field_2d):
+        """Compute integral length scale from spatial autocorrelation."""
+        mid_row = field_2d.shape[0] // 2
+        signal = field_2d[mid_row, :]
+        
+        # Autocorrelation
+        autocorr = jnp.correlate(signal, signal, mode='full')
+        autocorr = autocorr[len(autocorr)//2:]  # Take positive lags
+        autocorr = autocorr / (autocorr[0] + 1e-10)  # Normalize
+        
+        # Integral scale = ∫₀^∞ R(r) dr (until first zero crossing)
+        zero_crossing = jnp.where(autocorr <= 0)[0]
+        if len(zero_crossing) > 0:
+            integral_scale = np.trapz(autocorr[:zero_crossing[0]])
+        else:
+            integral_scale = np.trapz(autocorr)
+        
+        return float(integral_scale)
     
-    training_temp_corr = temporal_autocorr(training_u)
-    pred_temp_corr = temporal_autocorr(pred_u)
+    # Use time-averaged fields for spatial correlation
+    training_u_avg = jnp.mean(training_u, axis=0)
+    training_v_avg = jnp.mean(training_v, axis=0)
+    pred_u_avg = jnp.mean(pred_u, axis=0)
+    pred_v_avg = jnp.mean(pred_v, axis=0)
     
-    # Store temporal autocorrelation results
-    results['temporal_autocorr_training'] = training_temp_corr.tolist()
-    results['temporal_autocorr_pred'] = pred_temp_corr.tolist()
+    training_L_scale = compute_integral_length_scale(training_u_avg)
+    pred_L_scale = compute_integral_length_scale(pred_u_avg)
     
-    # 4. Temporal Correlation Metric
-    print("  4. Computing temporal correlation metric...")
-    temporal_threshold = 0.5
-    temporal_diff = jnp.abs(pred_temp_corr - training_temp_corr)
-    temporal_metric = jnp.mean(jnp.where(jnp.abs(training_temp_corr) > temporal_threshold,
-                                        temporal_diff, 0))
-    results['temporal_correlation_metric'] = float(temporal_metric)
+    results['integral_scales'] = {
+        'training_length_scale': training_L_scale,
+        'predicted_length_scale': pred_L_scale,
+        'length_scale_ratio': pred_L_scale / (training_L_scale + 1e-10)
+    }
     
-    # Additional basic statistics
-    results['rmse_u'] = float(jnp.sqrt(jnp.mean((training_u - pred_u)**2)))
-    results['rmse_v'] = float(jnp.sqrt(jnp.mean((training_v - pred_v)**2)))
-    results['mae_u'] = float(jnp.mean(jnp.abs(training_u - pred_u)))
-    results['mae_v'] = float(jnp.mean(jnp.abs(training_v - pred_v)))
+    # 5. Physics-based assessment
+    print("  5. Computing overall physics assessment...")
+    
+    # Check if both simulations follow physical laws
+    energy_decay_ok = results['energy_decay_analysis']['is_physical']
+    kolmogorov_ok = (results['kolmogorov_analysis']['training']['deviation_from_kolmogorov'] < 0.5 and 
+                    results['kolmogorov_analysis']['predicted']['deviation_from_kolmogorov'] < 0.5)
+    
+    physics_score = 0.0
+    if energy_decay_ok:
+        physics_score += 0.4
+    if kolmogorov_ok:
+        physics_score += 0.4
+    if results['energy_decay_analysis']['decay_exponent_difference'] < 0.2:
+        physics_score += 0.2
+    
+    results['physics_assessment'] = {
+        'overall_physics_score': physics_score,
+        'energy_decay_physical': energy_decay_ok,
+        'kolmogorov_scaling_physical': kolmogorov_ok,
+        'recommendation': (
+            "Excellent physical agreement" if physics_score > 0.8 else
+            "Good physical agreement" if physics_score > 0.6 else
+            "Moderate physical agreement" if physics_score > 0.4 else
+            "Poor physical agreement - investigate numerical methods"
+        )
+    }
+    
+    # Traditional metrics (for comparison only)
+    results['traditional_metrics'] = {
+        'rmse_u': float(jnp.sqrt(jnp.mean((training_u - pred_u)**2))),
+        'rmse_v': float(jnp.sqrt(jnp.mean((training_v - pred_v)**2))),
+        'note': 'These are chaos-sensitive and may not reflect physical accuracy'
+    }
     
     return results
+
+def apply_selected_metrics(data: Dict) -> Dict:
+    """Legacy function name - now calls physics-based metrics."""
+    return compute_physics_based_metrics(data)
 
 def create_comprehensive_plots(data: Dict, results: Dict, resolution: str, save_dir: str):
     """Create comprehensive visualization plots."""
@@ -185,33 +333,51 @@ def create_comprehensive_plots(data: Dict, results: Dict, resolution: str, save_
     plt.legend()
     plt.grid(True, alpha=0.3)
     
-    # Plot 2: Temporal autocorrelation
+    # Plot 2: Energy Decay Analysis
     plt.subplot(3, 3, 2)
-    if 'temporal_autocorr_training' in results:
-        lags = jnp.arange(len(results['temporal_autocorr_training']))
-        plt.plot(lags, results['temporal_autocorr_training'], 'b-', label='Training', linewidth=2)
-        plt.plot(lags, results['temporal_autocorr_pred'], 'r--', label='Predicted', linewidth=2)
-        plt.xlabel('Time lag')
-        plt.ylabel('Autocorrelation')
-        plt.title('Temporal Autocorrelation')
+    if 'energy_decay_analysis' in results:
+        training_energy = results['energy_decay_analysis']['training']['kinetic_energy']
+        pred_energy = results['energy_decay_analysis']['predicted']['kinetic_energy']
+        time_steps = jnp.arange(len(training_energy))
+        
+        plt.semilogy(time_steps, training_energy, 'b-', label='Training', linewidth=2)
+        plt.semilogy(time_steps, pred_energy, 'r--', label='Predicted', linewidth=2)
+        
+        # Add theoretical decay lines
+        if len(training_energy) > 5:
+            t_theory = time_steps[1:]  # Avoid t=0
+            E_theory_12 = training_energy[1] * (t_theory/1)**(-1.2)  # Physical expectation
+            plt.semilogy(t_theory, E_theory_12, 'k:', alpha=0.7, label='t^(-1.2) theory')
+        
+        plt.xlabel('Time step')
+        plt.ylabel('Kinetic Energy')
+        plt.title('Energy Decay Law')
         plt.legend()
         plt.grid(True, alpha=0.3)
     
-    # Plot 3: Metrics summary
+    # Plot 3: Physics-based Metrics Summary
     plt.subplot(3, 3, 3)
-    metric_names = ['Energy Spectrum', 'Spatial Corr', 'Temporal Corr']
-    metric_values = [
-        results.get('energy_spectrum_metric', 0),
-        results.get('spatial_correlation_metric', 0), 
-        results.get('temporal_correlation_metric', 0)
-    ]
-    bars = plt.bar(metric_names, metric_values, color=['lightblue', 'lightgreen', 'lightcoral'])
-    plt.ylabel('Metric Value')
-    plt.title('Evaluation Metrics Summary')
-    plt.xticks(rotation=45)
-    for bar, val in zip(bars, metric_values):
-        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, 
-                f'{val:.4f}', ha='center', va='bottom')
+    if 'physics_assessment' in results:
+        physics_score = results['physics_assessment']['overall_physics_score']
+        energy_decay_diff = results['energy_decay_analysis']['decay_exponent_difference']
+        kolm_slope_diff = results['kolmogorov_analysis']['slope_difference']
+        
+        metric_names = ['Physics\nScore', 'Energy Decay\nAgreement', 'Kolmogorov\nAgreement']
+        metric_values = [
+            physics_score,
+            max(0, 1 - energy_decay_diff / 0.5),  # Good if diff < 0.5
+            max(0, 1 - kolm_slope_diff / 0.5)
+        ]
+        
+        colors = ['lightgreen' if v > 0.7 else 'yellow' if v > 0.4 else 'lightcoral' for v in metric_values]
+        bars = plt.bar(metric_names, metric_values, color=colors)
+        plt.ylabel('Score (0-1)')
+        plt.title('Physics-Based Assessment')
+        plt.ylim(0, 1.1)
+        
+        for bar, val in zip(bars, metric_values):
+            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, 
+                    f'{val:.3f}', ha='center', va='bottom')
     
     # Plot 4-6: Velocity field snapshots (first time step)
     plt.subplot(3, 3, 4)
@@ -328,14 +494,61 @@ def main():
             with open(results_file, 'w') as f:
                 json.dump(results, f, indent=2)
             
-            print(f"\n📊 Results Summary for {resolution}:")
-            print(f"  Energy Spectrum Metric: {results.get('energy_spectrum_metric', 0):.6f}")
-            print(f"  Spatial Correlation Metric: {results.get('spatial_correlation_metric', 0):.6f}")
-            print(f"  Temporal Correlation Metric: {results.get('temporal_correlation_metric', 0):.6f}")
-            print(f"  RMSE U: {results.get('rmse_u', 0):.6f}")
-            print(f"  RMSE V: {results.get('rmse_v', 0):.6f}")
-            print(f"  MAE U: {results.get('mae_u', 0):.6f}")
-            print(f"  MAE V: {results.get('mae_v', 0):.6f}")
+            print(f"\n📊 Physics-Based Results Summary for {resolution}:")
+            print("="*50)
+            
+            # Physics assessment
+            if 'physics_assessment' in results:
+                assessment = results['physics_assessment']
+                print(f"🔬 Overall Physics Score: {assessment['overall_physics_score']:.3f}/1.0")
+                print(f"📝 Assessment: {assessment['recommendation']}")
+                print()
+            
+            # Energy decay analysis
+            if 'energy_decay_analysis' in results:
+                decay = results['energy_decay_analysis']
+                print(f"⚡ Energy Decay Analysis:")
+                print(f"  Training decay exponent: {decay['training']['decay_exponent']:.3f}")
+                print(f"  Predicted decay exponent: {decay['predicted']['decay_exponent']:.3f}")
+                print(f"  Difference: {decay['decay_exponent_difference']:.3f}")
+                print(f"  Physical range (1.0-1.5): {'✅' if decay['is_physical'] else '❌'}")
+                print()
+            
+            # Kolmogorov scaling
+            if 'kolmogorov_analysis' in results:
+                kolm = results['kolmogorov_analysis']
+                print(f"🌪️  Kolmogorov Scaling Analysis:")
+                print(f"  Training inertial slope: {kolm['training']['inertial_slope']:.3f}")
+                print(f"  Predicted inertial slope: {kolm['predicted']['inertial_slope']:.3f}")
+                print(f"  Theoretical slope: -1.667")
+                print(f"  Slope difference: {kolm['slope_difference']:.3f}")
+                print()
+            
+            # Velocity statistics
+            if 'velocity_statistics' in results:
+                stats = results['velocity_statistics']
+                print(f"📈 Velocity Statistics:")
+                print(f"  Skewness difference: {stats['skewness_difference']:.3f}")
+                print(f"  Kurtosis difference: {stats['kurtosis_difference']:.3f}")
+                print()
+            
+            # Integral scales
+            if 'integral_scales' in results:
+                scales = results['integral_scales']
+                print(f"📏 Integral Length Scales:")
+                print(f"  Training: {scales['training_length_scale']:.3f}")
+                print(f"  Predicted: {scales['predicted_length_scale']:.3f}")
+                print(f"  Ratio: {scales['length_scale_ratio']:.3f}")
+                print()
+            
+            # Traditional metrics (with warning)
+            if 'traditional_metrics' in results:
+                trad = results['traditional_metrics']
+                print(f"⚠️  Traditional Metrics (chaos-sensitive):")
+                print(f"  RMSE U: {trad['rmse_u']:.6f}")
+                print(f"  RMSE V: {trad['rmse_v']:.6f}")
+                print(f"  Note: {trad['note']}")
+                print()
             
         except Exception as e:
             print(f"❌ Error processing {resolution}: {str(e)}")

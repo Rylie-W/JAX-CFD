@@ -1,0 +1,11 @@
+{
+  "energy_spectrum_metric": 0.07425068318843842,
+  "spatial_correlation_metric": 1.2070244550704956,
+  "temporal_autocorr_training": [],
+  "temporal_autocorr_pred": [],
+  "temporal_correlation_metric": NaN,
+  "rmse_u": 1.2911710739135742,
+  "rmse_v": 1.1717218160629272,
+  "mae_u": 1.0258581638336182,
+  "mae_v": 0.9207929372787476
+}
