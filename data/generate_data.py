@@ -513,7 +513,7 @@ def main(args):
       for resolution in resolution_list:
         trajectory = get_trajectory(args, size=resolution, outer_steps=args.generate_steps, v0=warmup_result)
         
-        save_dir = f'../data/training_data/{resolution}'
+        save_dir = f'/mnt/data/yiwei/training_data/{resolution}'
         os.makedirs(save_dir, exist_ok=True)
         
         data_file = f'{save_dir}/{args.save_file}_{resolution}x{resolution}_index_{args.save_index}.npz'

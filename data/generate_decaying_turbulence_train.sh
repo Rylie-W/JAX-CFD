@@ -12,7 +12,7 @@ python generate_data.py \
     --high_res 2048 \
     --low_res  2048\
     --outer_steps 1 \
-    --generate_steps 1000 \
+    --generate_steps 12200 \
     --warmup_time 4.0 \
     --max_velocity 4.2 \
     --peak_wavenumber 4 \
