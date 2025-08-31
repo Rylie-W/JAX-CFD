@@ -1,0 +1,28 @@
+name: cfd
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.8
+  - pip
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - jupyter
+  - pip:
+    # 只安装核心依赖，让pip自动解决版本冲突
+    - jax[cuda11_pip] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    - tensorflow
+    - torch
+    - flax
+    - optax
+    - chex
+    - dm-haiku
+    - gin-config
+    - tqdm
+    - h5py
+    - xarray
+    - imageio
+    - scikit-image
+    - seaborn
