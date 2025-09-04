@@ -475,6 +475,27 @@ def main(args):
           warmup_result[1].array.data = warmup_result[1].array.data[-1]
       warmup_result = get_trajectory(args, size=args.high_res, rng=subrng,
                                      outer_steps=outer_steps, v0=warmup_result)
+      if count == 0:
+        resolution = args.high_res
+        save_dir = f'/Volumes/T7/jax/{resolution}'
+        np.savez_compressed(f'{save_dir}/{args.save_file}_inital_warmup_{resolution}x{resolution}_index_{args.save_index}.npz',
+                            u=warmup_result[0].data,
+                            v=warmup_result[1].data,
+                            resolution=args.high_res,
+                            outer_steps=outer_steps,
+                            warmup_time=args.warmup_time,
+                            max_velocity=args.max_velocity,
+                            viscosity=args.viscosity,
+                            decay=args.decay,
+                            seed=args.seed,
+                            characteristic_length=args.characteristic_length,
+                            domain_scale=args.domain_scale,
+                            low_res=args.low_res,
+                            cfl_safety_factor=args.cfl_safety_factor,
+                            density=args.density,
+                            forcing_scale=args.forcing_scale,
+                            peak_wavenumber=args.peak_wavenumber,
+                            timestep = get_dt(args, args.low_res, args.characteristic_length))
       count += outer_steps
 
     if warm_up_step > count:
@@ -511,34 +532,61 @@ def main(args):
     else:
       # Training data mode: generate full datasets with generate_steps
       for resolution in resolution_list:
-        trajectory = get_trajectory(args, size=resolution, outer_steps=args.generate_steps, v0=warmup_result)
-        
-        save_dir = f'/mnt/data/yiwei/training_data/{resolution}'
-        os.makedirs(save_dir, exist_ok=True)
-        
-        data_file = f'{save_dir}/{args.save_file}_{resolution}x{resolution}_index_{args.save_index}.npz'
-        logger.info(f"Saving training data to: {data_file}")
-        
-        # Save velocity components and ALL metadata needed for plot_trajectory
-        np.savez_compressed(data_file,
-                           u=trajectory[0].data,  # x-velocity component
-                           v=trajectory[1].data,  # y-velocity component
-                           resolution=resolution,
-                           outer_steps=args.generate_steps,
-                           warmup_time=args.warmup_time,
-                           max_velocity=args.max_velocity,
-                           viscosity=args.viscosity,
-                           decay=args.decay,
-                           seed=args.seed,
-                           # Additional args needed for plot_trajectory
-                           characteristic_length=args.characteristic_length,
-                           domain_scale=args.domain_scale,
-                           low_res=args.low_res,
-                           cfl_safety_factor=args.cfl_safety_factor,
-                           density=args.density,
-                           forcing_scale=args.forcing_scale,
-                           peak_wavenumber=args.peak_wavenumber,
-                           timestep = get_dt(args, args.low_res, args.characteristic_length))
+        count = 0
+        while count + args.training_save_interval <= args.generate_steps:
+          trajectory = get_trajectory(args, size=resolution, outer_steps=args.training_save_interval, v0=warmup_result)
+
+          count += args.training_save_interval
+          save_dir = f'/Volumes/T7/jax/{resolution}'
+          os.makedirs(save_dir, exist_ok=True)
+          
+          data_file = f'{save_dir}/{args.save_file}_{resolution}x{resolution}_step_{count}_index_{args.save_index}.npz'
+          logger.info(f"Saving training data to: {data_file}")
+          
+          # Save velocity components and ALL metadata needed for plot_trajectory
+          np.savez_compressed(data_file,
+                            u=trajectory[0].data,  # x-velocity component
+                            v=trajectory[1].data,  # y-velocity component
+                            resolution=resolution,
+                            outer_steps=args.generate_steps,
+                            warmup_time=args.warmup_time,
+                            max_velocity=args.max_velocity,
+                            viscosity=args.viscosity,
+                            decay=args.decay,
+                            seed=args.seed,
+                            # Additional args needed for plot_trajectory
+                            characteristic_length=args.characteristic_length,
+                            domain_scale=args.domain_scale,
+                            low_res=args.low_res,
+                            cfl_safety_factor=args.cfl_safety_factor,
+                            density=args.density,
+                            forcing_scale=args.forcing_scale,
+                            peak_wavenumber=args.peak_wavenumber,
+                            timestep = get_dt(args, args.low_res, args.characteristic_length))
+        trajectory = None
+
+        if count < args.generate_steps:
+          trajectory = get_trajectory(args, size=resolution, outer_steps=args.generate_steps - count, v0=warmup_result)
+          count = args.generate_steps
+          data_file = f'{save_dir}/{args.save_file}_{resolution}x{resolution}_step_{count}_index_{args.save_index}.npz'
+          np.savez_compressed(data_file,
+                            u=trajectory[0].data,
+                            v=trajectory[1].data,
+                            resolution=resolution,
+                            outer_steps=args.generate_steps,
+                            warmup_time=args.warmup_time,
+                            max_velocity=args.max_velocity,
+                            viscosity=args.viscosity,
+                            decay=args.decay,
+                            seed=args.seed,
+                            characteristic_length=args.characteristic_length,
+                            domain_scale=args.domain_scale,
+                            low_res=args.low_res,
+                            cfl_safety_factor=args.cfl_safety_factor,
+                            density=args.density,
+                            forcing_scale=args.forcing_scale,
+                            peak_wavenumber=args.peak_wavenumber,
+                            timestep = get_dt(args, args.low_res, args.characteristic_length))
         
         logger.info(f"Saved trajectory shape: {trajectory[0].data.shape}")
         logger.info(f"Resolution: {resolution}x{resolution}, Steps: {args.generate_steps}")
@@ -569,6 +617,7 @@ if __name__ == "__main__":
   # For generating data
   parser.add_argument('--save_file', type=str, default="re1000")
   parser.add_argument('--save_index', type=int, default=1)
+  parser.add_argument('--training_save_interval', type=int, default=1000, help='Save data every N steps to avoid memory issues')
   parser.add_argument('--save_interval', type=int, default=1000, help='Save data every N steps to avoid memory issues')
   parser.add_argument('--subsample_interval', type=int, default=1, help='Save every Nth timestep (e.g., 10 means save every 10th timestep)')
   parser.add_argument('--initial_velocity_file', type=str, default=None, help='Path to .npz file containing initial velocity field (optional)')

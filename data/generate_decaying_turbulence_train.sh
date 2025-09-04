@@ -22,3 +22,4 @@ python generate_data.py \
     --iters 1 \
     --demo_file "decaying_turbulence_v2" \
     --seed 42 \
+    --training_save_interval 100 \
