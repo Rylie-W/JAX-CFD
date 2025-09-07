@@ -126,6 +126,27 @@ def main(args):
       if warmup_result is not None:
         warmup_result[0].array.data = warmup_result[0].array.data[-1]
         warmup_result[1].array.data = warmup_result[1].array.data[-1]
+
+        save_dir = f'../data/training_data/{args.high_res}'
+        np.savez_compressed(f'{save_dir}/{args.save_file}_warmup_initial_velocity.npz',
+                           u=warmup_result[0].data,
+                           v=warmup_result[1].data,
+                           resolution=args.high_res,
+                           outer_steps=outer_steps if count + outer_steps <= warm_up_step else warm_up_step - count,
+                           warmup_step_count=count,
+                           warmup_time=args.warmup_time,
+                           warmup_time_step=delta_t,  # Add warmup time step
+                           max_velocity=args.max_velocity,
+                           viscosity=args.viscosity,
+                           decay=args.decay,
+                           seed=args.seed,
+                           characteristic_length=args.characteristic_length,
+                           domain_scale=args.domain_scale,
+                           low_res=args.low_res,
+                           cfl_safety_factor=args.cfl_safety_factor,
+                           density=args.density,
+                           forcing_scale=args.forcing_scale,
+                           peak_wavenumber=args.peak_wavenumber)
       warmup_result = get_trajectory(args, size=args.high_res, rng=subrng,
                                      outer_steps=outer_steps, v0=warmup_result)
       
@@ -195,37 +216,44 @@ def main(args):
     else:
       # Training data mode: generate full datasets with generate_steps
       for resolution in resolution_list:
-        trajectory = get_trajectory(args, size=resolution, outer_steps=args.generate_steps, v0=warmup_result)
-        
-        save_dir = f'../data/training_data'
-        os.makedirs(save_dir, exist_ok=True)
-        
-        data_file = f'{save_dir}/{args.save_file}_{resolution}x{resolution}_index_{args.save_index}.npz'
-        logger.info(f"Saving training data to: {data_file}")
-        
-        # Save velocity components and ALL metadata needed for plot_trajectory
-        np.savez_compressed(data_file,
-                           u=trajectory[0].data,  # x-velocity component
-                           v=trajectory[1].data,  # y-velocity component
-                           resolution=resolution,
-                           outer_steps=args.generate_steps,
-                           warmup_time=args.warmup_time,
-                           max_velocity=args.max_velocity,
-                           viscosity=args.viscosity,
-                           decay=args.decay,
-                           seed=args.seed,
-                           # Additional args needed for plot_trajectory
-                           characteristic_length=args.characteristic_length,
-                           domain_scale=args.domain_scale,
-                           low_res=args.low_res,
-                           cfl_safety_factor=args.cfl_safety_factor,
-                           density=args.density,
-                           forcing_scale=args.forcing_scale,
-                           peak_wavenumber=args.peak_wavenumber,
-                           timestep = get_dt(args, args.low_res, args.characteristic_length))
-        
-        logger.info(f"Saved trajectory shape: {trajectory[0].data.shape}")
-        logger.info(f"Resolution: {resolution}x{resolution}, Steps: {args.generate_steps}")
+        count = 0
+        trajectory = None
+        while count + args.training_save_interval <= args.generate_steps:
+          if trajectory is not None:
+            trajectory[0].array.data = trajectory[0].array.data[-1]
+            trajectory[1].array.data = trajectory[1].array.data[-1]
+          trajectory = get_trajectory(args, size=resolution, outer_steps=args.training_save_interval, v0=warmup_result if count == 0 else trajectory)
+          
+          save_dir = f'../data/training_data/{resolution}'
+          os.makedirs(save_dir, exist_ok=True)
+          
+          count += args.training_save_interval
+          data_file = f'{save_dir}/{args.save_file}_{resolution}x{resolution}_step_{count}_index_{args.save_index}.npz'
+          logger.info(f"Saving training data to: {data_file}")
+          
+          # Save velocity components and ALL metadata needed for plot_trajectory
+          np.savez_compressed(data_file,
+                            u=trajectory[0].data,  # x-velocity component
+                            v=trajectory[1].data,  # y-velocity component
+                            resolution=resolution,
+                            outer_steps=args.generate_steps,
+                            warmup_time=args.warmup_time,
+                            max_velocity=args.max_velocity,
+                            viscosity=args.viscosity,
+                            decay=args.decay,
+                            seed=args.seed,
+                            # Additional args needed for plot_trajectory
+                            characteristic_length=args.characteristic_length,
+                            domain_scale=args.domain_scale,
+                            low_res=args.low_res,
+                            cfl_safety_factor=args.cfl_safety_factor,
+                            density=args.density,
+                            forcing_scale=args.forcing_scale,
+                            peak_wavenumber=args.peak_wavenumber,
+                            timestep = get_dt(args, args.low_res, args.characteristic_length))
+          
+          logger.info(f"Saved trajectory shape: {trajectory[0].data.shape}")
+          logger.info(f"Resolution: {resolution}x{resolution}, Steps: {args.generate_steps}")
 
 
 if __name__ == "__main__":
@@ -254,4 +282,5 @@ if __name__ == "__main__":
   # For generating data
   parser.add_argument('--save_file', type=str, default="re1000")
   parser.add_argument('--save_index', type=int, default=1)
+  parser.add_argument('--training_save_interval', type=int, default=10)
   main(parser.parse_args()) 

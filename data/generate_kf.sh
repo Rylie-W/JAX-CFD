@@ -9,11 +9,11 @@ set -x
 # - Burn-in time and other parameters from paper
 
 python generate_data.py \
-    --high_res 2048 \
-    --low_res  2048\
-    --outer_steps 1 \
+    --high_res 64 \
+    --low_res  64\
+    --outer_steps 100 \
     --generate_steps 34770 \
-    --warmup_time 4.0 \
+    --warmup_time 40.0 \
     --max_velocity 7.0 \
     --peak_wavenumber 4 \
     --forcing_scale 1.0 \
@@ -23,4 +23,4 @@ python generate_data.py \
     --iters 1 \
     --demo_file "Kolmogorov" \
     --seed 42 \
-    --training_save_interval 10
+    --training_save_interval 1000
