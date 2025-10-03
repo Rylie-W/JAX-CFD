@@ -51,6 +51,8 @@ def get_trajectory(args, size, rng=None, outer_steps=50, v0=None):
     large_grid = cfd.grids.Grid((args.high_res, args.high_res), domain=((0, 2 * jnp.pi * cl * args.domain_scale),
                                                                         (0, 2 * jnp.pi * cl * args.domain_scale)))
     v0 = cfd.resize.downsample_staggered_velocity(large_grid, grid, v0)
+  
+  force = forcing(v0) if forcing is not None else (jnp.zeros_like(v0[0].data), jnp.zeros_like(v0[1].data))
 
   # Define a step function and use it to compute a trajectory.
   step_fn = cfd.funcutils.repeated(
@@ -64,7 +66,7 @@ def get_trajectory(args, size, rng=None, outer_steps=50, v0=None):
 
   rollout_fn = jax.jit(cfd.funcutils.trajectory(step_fn, outer_steps))
   _, trajectory = jax.device_get(rollout_fn(v0))
-  return trajectory
+  return trajectory, force
 
 
 def plot_trajectory(args, size, trajectory, file_name):
@@ -128,6 +130,7 @@ def main(args):
         warmup_result[1].array.data = warmup_result[1].array.data[-1]
 
         save_dir = f'../data/training_data/{args.high_res}'
+        os.makedirs(save_dir, exist_ok=True)
         np.savez_compressed(f'{save_dir}/{args.save_file}_warmup_initial_velocity.npz',
                            u=warmup_result[0].data,
                            v=warmup_result[1].data,
@@ -147,8 +150,8 @@ def main(args):
                            density=args.density,
                            forcing_scale=args.forcing_scale,
                            peak_wavenumber=args.peak_wavenumber)
-      warmup_result = get_trajectory(args, size=args.high_res, rng=subrng,
-                                     outer_steps=outer_steps, v0=warmup_result)
+      warmup_result, _ = get_trajectory(args, size=args.high_res, rng=subrng,
+                                        outer_steps=outer_steps, v0=warmup_result)
       
       # Store warmup trajectory if save_warmup is enabled
       if args.save_warmup:
@@ -160,8 +163,8 @@ def main(args):
       if warmup_result is not None:
         warmup_result[0].array.data = warmup_result[0].array.data[-1]
         warmup_result[1].array.data = warmup_result[1].array.data[-1]
-      final_warmup = get_trajectory(args, size=args.high_res, rng=subrng,
-                                   outer_steps=warm_up_step - count, v0=warmup_result)
+      final_warmup, _ = get_trajectory(args, size=args.high_res, rng=subrng,
+                                       outer_steps=warm_up_step - count, v0=warmup_result)
       if args.save_warmup:
         warmup_trajectories.append((count, final_warmup))
       warmup_result = final_warmup
@@ -169,7 +172,7 @@ def main(args):
     # Save warmup data if requested
     if args.save_warmup and warmup_trajectories:
       save_dir = f'../data/warmup_data'
-      os.makedirs(save_dir, exist_ok=True)
+      os.makedirs(f'{save_dir}/{args.high_res}', exist_ok=True)
       
       logger.info(f"Saving {len(warmup_trajectories)} warmup trajectory segments...")
       for segment_idx, (step_count, trajectory) in enumerate(warmup_trajectories):
@@ -209,7 +212,7 @@ def main(args):
     if args.demo:
       # Demo mode: create visualizations with demo_steps
       for resolution in resolution_list:
-        trajectory = get_trajectory(args, size=resolution, outer_steps=args.demo_steps, v0=warmup_result)
+        trajectory, _ = get_trajectory(args, size=resolution, outer_steps=args.demo_steps, v0=warmup_result)
         file_name = f'../figs/%s_demo_{resolution}x{resolution}.png' % args.save_file
         logger.info(file_name)
         plot_trajectory(args, resolution, trajectory, file_name)
@@ -222,7 +225,7 @@ def main(args):
           if trajectory is not None:
             trajectory[0].array.data = trajectory[0].array.data[-1]
             trajectory[1].array.data = trajectory[1].array.data[-1]
-          trajectory = get_trajectory(args, size=resolution, outer_steps=args.training_save_interval, v0=warmup_result if count == 0 else trajectory)
+          trajectory, force = get_trajectory(args, size=resolution, outer_steps=args.training_save_interval, v0=warmup_result if count == 0 else trajectory)
           
           save_dir = f'../data/training_data/{resolution}'
           os.makedirs(save_dir, exist_ok=True)
@@ -250,7 +253,10 @@ def main(args):
                             density=args.density,
                             forcing_scale=args.forcing_scale,
                             peak_wavenumber=args.peak_wavenumber,
-                            timestep = get_dt(args, args.low_res, args.characteristic_length))
+                            timestep = get_dt(args, args.low_res, args.characteristic_length),
+                            fu=force[0].data,
+                            fv=force[1].data
+                            )
           
           logger.info(f"Saved trajectory shape: {trajectory[0].data.shape}")
           logger.info(f"Resolution: {resolution}x{resolution}, Steps: {args.generate_steps}")
