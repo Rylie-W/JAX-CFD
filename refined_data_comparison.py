@@ -17,7 +17,7 @@ from pathlib import Path
 # Additional JAX configuration for CPU
 jax.config.update('jax_platform_name', 'cpu')
 
-def load_and_align_data(training_file: str, pred_file: str, sampling_interval: int = 1, max_timesteps: int = 1000):
+def load_and_align_data(training_file: str, pred_file: str, sampling_interval: int = 10, max_timesteps: int = 1000):
     """Load and temporally align training and prediction data."""
     print(f"Loading training data: {training_file}")
     training_data = np.load(training_file)
@@ -293,7 +293,7 @@ def main():
     os.makedirs(results_dir, exist_ok=True)
     
     # Define data files to compare (start with 64x64 for testing)
-    resolutions = ['128x128']  # Can expand to ['64x64', '128x128', '256x256', '512x512']
+    resolutions = ['1024x1024']  # Can expand to ['64x64', '128x128', '256x256', '512x512']
     
     all_results = {}
     
@@ -302,8 +302,8 @@ def main():
         print(f"Processing resolution: {resolution}")
         print(f"{'='*60}")
         
-        training_file = f"data/training_data/decaying_turbulence_v2_{resolution}_index_1.npz"
-        pred_file = f"data/pict_data/pict_from_warmup_with_comparison_{resolution}_index_1.npz"
+        training_file = f"data/training_data/1024/decaying_turbulence_v2_with_warmup_init_{resolution}_index_1.npz"
+        pred_file = f"data/pict_data/turbulence_1024_step1000_{resolution}_index_1.npz"
         
         if not os.path.exists(training_file):
             print(f"Training file not found: {training_file}")

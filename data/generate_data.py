@@ -69,6 +69,92 @@ def get_trajectory(args, size, rng=None, outer_steps=50, v0=None):
   return trajectory, force
 
 
+def load_initial_velocity_from_file(filepath: str, target_size: int, args) -> tuple:
+  """
+  Load initial velocity field from a .npz file and prepare it for simulation.
+  The output structure exactly matches what filtered_velocity_field produces.
+  
+  Args:
+    filepath: Path to the .npz file containing velocity data
+    target_size: Target resolution for the simulation
+    args: Simulation arguments
+    
+  Returns:
+    List of GridVariable objects compatible with filtered_velocity_field output
+  """
+  import os
+  
+  if not os.path.exists(filepath):
+    raise FileNotFoundError(f"Initial velocity file not found: {filepath}")
+  
+  # Load the data
+  data = np.load(filepath)
+  u_data = data['u']
+  v_data = data['v']
+  
+  logging.info(f"Loaded initial velocity from: {filepath}")
+  logging.info(f"Original data shape: u={u_data.shape}, v={v_data.shape}")
+  
+  # Use the first timestep as initial condition
+  if len(u_data.shape) == 3:  # (time, x, y)
+    u_initial = u_data[0] 
+    v_initial = v_data[0]
+  else:  # (x, y)
+    u_initial = u_data
+    v_initial = v_data
+  
+  original_size = u_initial.shape[0]
+  logging.info(f"Using initial condition shape: {u_initial.shape}")
+  
+  # Create the target grid (this is what we want)
+  cl = args.characteristic_length
+  target_grid = cfd.grids.Grid((target_size, target_size), 
+                              domain=((0, 2 * jnp.pi * cl * args.domain_scale),
+                                     (0, 2 * jnp.pi * cl * args.domain_scale)))
+  
+  # If sizes don't match, we need to resize the data first
+  if target_size != original_size:
+    logging.info(f"Resizing from {original_size}x{original_size} to {target_size}x{target_size}")
+    
+    # Create temporary grid for original data
+    original_grid = cfd.grids.Grid((original_size, original_size), 
+                                  domain=((0, 2 * jnp.pi * cl * args.domain_scale),
+                                         (0, 2 * jnp.pi * cl * args.domain_scale)))
+    
+    # Create temporary GridArrays
+    u_temp = cfd.grids.GridArray(jnp.array(u_initial), offset=(0.5, 0.0), grid=original_grid)
+    v_temp = cfd.grids.GridArray(jnp.array(v_initial), offset=(0.0, 0.5), grid=original_grid)
+    
+    # Resize
+    if target_size < original_size:
+      u_array, v_array = cfd.resize.downsample_staggered_velocity(original_grid, target_grid, [u_temp, v_temp])
+    else:
+      u_array, v_array = cfd.resize.upsample_staggered_velocity(original_grid, target_grid, [u_temp, v_temp])
+  else:
+    # Same size - create GridArrays directly
+    u_array = cfd.grids.GridArray(jnp.array(u_initial), offset=(0.5, 0.0), grid=target_grid)
+    v_array = cfd.grids.GridArray(jnp.array(v_initial), offset=(0.0, 0.5), grid=target_grid)
+  
+  # Create a structure that exactly matches filtered_velocity_field output
+  # Use the same approach as filtered_velocity_field but with our data
+  u_final = cfd.grids.GridVariable(
+    u_array, 
+    bc=cfd.boundaries.periodic_boundary_conditions(target_grid.ndim)
+  )
+  v_final = cfd.grids.GridVariable(
+    v_array,
+    bc=cfd.boundaries.periodic_boundary_conditions(target_grid.ndim)
+  )
+  
+  # Wrap in tuple exactly like filtered_velocity_field does
+  result = (u_final, v_final)
+  
+  logging.info(f"Final initial velocity shape: u={u_final.shape}, v={v_final.shape}")
+  logging.info(f"Final structure matches filtered_velocity_field: ✅")
+  
+  return result
+
+
 def plot_trajectory(args, size, trajectory, file_name):
   cl = args.characteristic_length
   grid = cfd.grids.Grid((size, size), domain=((0, 2 * jnp.pi * cl * args.domain_scale),
@@ -121,14 +207,20 @@ def main(args):
 
     count = 0
     warmup_result = None
-    warmup_trajectories = []  # Store warmup trajectories if needed
-
+    
+    # Check if initial velocity file is provided
+    if args.initial_velocity_file:
+      logger.info(f"Loading initial velocity from: {args.initial_velocity_file}")
+      warmup_result = load_initial_velocity_from_file(args.initial_velocity_file, args.high_res, args)
+      logger.info("Using loaded initial velocity as warmup starting point")
+    
+    # Run warmup simulation (compute only, no saving)
     while count + outer_steps <= warm_up_step:
-      logger.info(f"step {count} of {warm_up_step}")
-      if warmup_result is not None:
-        warmup_result[0].array.data = warmup_result[0].array.data[-1]
-        warmup_result[1].array.data = warmup_result[1].array.data[-1]
-
+      logger.info(f"Warmup step {count} of {warm_up_step}")
+      if len(warmup_result[0].array.data.shape) > 2:  # Has time dimension
+          warmup_result[0].array.data = warmup_result[0].array.data[-1]
+          warmup_result[1].array.data = warmup_result[1].array.data[-1]
+      if count == outer_steps:
         save_dir = f'../data/training_data/{args.high_res}'
         os.makedirs(save_dir, exist_ok=True)
         np.savez_compressed(f'{save_dir}/{args.save_file}_warmup_initial_velocity.npz',
@@ -150,14 +242,14 @@ def main(args):
                            density=args.density,
                            forcing_scale=args.forcing_scale,
                            peak_wavenumber=args.peak_wavenumber)
-      warmup_result, _ = get_trajectory(args, size=args.high_res, rng=subrng,
+    warmup_result, _ = get_trajectory(args, size=args.high_res, rng=subrng,
                                         outer_steps=outer_steps, v0=warmup_result)
       
-      # Store warmup trajectory if save_warmup is enabled
-      if args.save_warmup:
-        warmup_trajectories.append((count, warmup_result))
+    # Store warmup trajectory if save_warmup is enabled
+    if args.save_warmup:
+      warmup_trajectories.append((count, warmup_result))
       
-      count += outer_steps
+    count += outer_steps
 
     if warm_up_step > count:
       if warmup_result is not None:
@@ -168,6 +260,8 @@ def main(args):
       if args.save_warmup:
         warmup_trajectories.append((count, final_warmup))
       warmup_result = final_warmup
+    
+    logger.info("Warmup completed - no warmup data saved")
 
     # Save warmup data if requested
     if args.save_warmup and warmup_trajectories:
@@ -284,9 +378,9 @@ if __name__ == "__main__":
   parser.add_argument('--domain_scale', type=int, default=1)
   parser.add_argument('--decay', default=False, action='store_true')
   parser.add_argument('--demo', default=False, action='store_true')
-  parser.add_argument('--save_warmup', default=False, action='store_true')
   # For generating data
   parser.add_argument('--save_file', type=str, default="re1000")
   parser.add_argument('--save_index', type=int, default=1)
   parser.add_argument('--training_save_interval', type=int, default=10)
+  parser.add_argument('--initial_velocity_file', type=str, default="/Users/yiwei/Projects/Python/thesis/JAX-CFD/data/training_data/256/kolmogorov_warmup_initial_velocity.npz", help='Path to .npz file containing initial velocity field (optional)')
   main(parser.parse_args()) 
